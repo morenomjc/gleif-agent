@@ -5,6 +5,7 @@ import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.H2;
 import com.vaadin.flow.component.html.Span;
+import com.vaadin.flow.component.progressbar.ProgressBar;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.Scroller;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
@@ -17,7 +18,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Pattern;
@@ -28,10 +32,11 @@ public class ChatView extends VerticalLayout {
 
     private static final String WELCOME_MESSAGE_SESSION_KEY = "chat.welcome.message";
     private static final String WELCOME_MODEL_SESSION_KEY = "chat.welcome.model";
+    private static final String WELCOME_TIMESTAMP_SESSION_KEY = "chat.welcome.timestamp";
     private static final String WELCOME_FALLBACK = "Welcome! I am Gandalf. I can help you look up LEI details.";
     private static final String EMPTY_REPLY_FALLBACK = "I received an empty response. Please try again.";
-    private static final String UNSUPPORTED_PROMPT_GENERIC_MESSAGE =
-            "Unsupported request. Please provide one LEI code (20 alphanumeric characters).";
+    private static final String UNSUPPORTED_PROMPT_FALLBACK_MESSAGE =
+            "Unsupported request. This chat currently supports LEI detail lookup for one LEI code per request.";
     private static final String AI_PROVIDER_ERROR_MESSAGE =
             "AI provider error. Please verify OPENAI/OpenRouter credentials and try again.";
     private static final Pattern BOLD_MARKDOWN = Pattern.compile("\\*\\*(.+?)\\*\\*");
@@ -45,6 +50,7 @@ public class ChatView extends VerticalLayout {
             "Aligning moonbeams...",
             "Untangling prophecy..."
     };
+    private static final DateTimeFormatter CHAT_TIME_FORMATTER = DateTimeFormatter.ofPattern("h:mm a");
 
     private final RestClient restClient;
     private final String configuredModelName;
@@ -105,9 +111,13 @@ public class ChatView extends VerticalLayout {
         String cachedWelcomeMessage = (String) VaadinSession.getCurrent().getAttribute(WELCOME_MESSAGE_SESSION_KEY);
         if (cachedWelcomeMessage != null && !cachedWelcomeMessage.isBlank()) {
             String cachedWelcomeModel = (String) VaadinSession.getCurrent().getAttribute(WELCOME_MODEL_SESSION_KEY);
+            String cachedWelcomeTimestamp = (String) VaadinSession.getCurrent().getAttribute(WELCOME_TIMESTAMP_SESSION_KEY);
             addAssistantMessage(
                     cachedWelcomeModel == null || cachedWelcomeModel.isBlank() ? configuredModelName : cachedWelcomeModel,
-                    cachedWelcomeMessage
+                    cachedWelcomeMessage,
+                    cachedWelcomeTimestamp == null || cachedWelcomeTimestamp.isBlank()
+                            ? formatTimestamp(Instant.now())
+                            : cachedWelcomeTimestamp
             );
             return;
         }
@@ -138,6 +148,9 @@ public class ChatView extends VerticalLayout {
 
         CompletableFuture.supplyAsync(() -> callChatEndpoint(prompt))
                 .whenComplete((response, throwable) -> ui.access(() -> {
+                    String timestamp = formatTimestamp(throwable == null ? response.timestamp() : Instant.now());
+                    pendingMessage.timestamp.setText(timestamp);
+                    pendingMessage.loading.setVisible(false);
                     if (throwable != null) {
                         pendingMessage.model.setText("");
                         renderAssistantText(pendingMessage.message, resolveUiErrorMessage(throwable));
@@ -152,6 +165,7 @@ public class ChatView extends VerticalLayout {
                         if (welcomeMessage) {
                             VaadinSession.getCurrent().setAttribute(WELCOME_MODEL_SESSION_KEY, model);
                             VaadinSession.getCurrent().setAttribute(WELCOME_MESSAGE_SESSION_KEY, message);
+                            VaadinSession.getCurrent().setAttribute(WELCOME_TIMESTAMP_SESSION_KEY, timestamp);
                         }
                     }
                     if (disableComposer) {
@@ -176,7 +190,7 @@ public class ChatView extends VerticalLayout {
         } catch (RestClientResponseException ex) {
             int statusCode = ex.getStatusCode().value();
             if (statusCode == 422) {
-                throw new UiChatException(UNSUPPORTED_PROMPT_GENERIC_MESSAGE);
+                throw new UiChatException(resolveChatApiErrorMessage(ex, UNSUPPORTED_PROMPT_FALLBACK_MESSAGE));
             }
             if (statusCode == 502) {
                 throw new UiChatException(AI_PROVIDER_ERROR_MESSAGE);
@@ -206,8 +220,14 @@ public class ChatView extends VerticalLayout {
         bubble.getStyle().set("color", "#0f172a");
         bubble.getStyle().set("padding", "10px 12px");
         bubble.getStyle().set("border-radius", "12px");
-        bubble.getStyle().set("white-space", "pre-wrap");
-        bubble.setText(message);
+        Span messageText = new Span(message);
+        messageText.getStyle().set("white-space", "pre-wrap");
+        messageText.getStyle().set("display", "block");
+        Span timestamp = createTimestampLabel(formatTimestamp(Instant.now()));
+        timestamp.getStyle().set("text-align", "right");
+        timestamp.getStyle().set("margin-top", "8px");
+        timestamp.getStyle().set("display", "block");
+        bubble.add(messageText, timestamp);
 
         row.add(bubble);
         messagesLayout.add(row);
@@ -248,16 +268,31 @@ public class ChatView extends VerticalLayout {
         message.getStyle().set("white-space", "pre-wrap");
         message.getStyle().set("margin-top", "6px");
 
+        HorizontalLayout footer = new HorizontalLayout();
+        footer.setWidthFull();
+        footer.setPadding(false);
+        footer.setSpacing(true);
+        footer.setAlignItems(Alignment.CENTER);
+        footer.setJustifyContentMode(JustifyContentMode.BETWEEN);
+        footer.getStyle().set("margin-top", "8px");
+
+        Span timestamp = createTimestampLabel("");
+        ProgressBar loading = new ProgressBar();
+        loading.setIndeterminate(true);
+        loading.getStyle().set("width", "48px");
+        loading.getStyle().set("height", "4px");
+
+        footer.add(timestamp, loading);
         header.add(name, model);
-        bubble.add(header, message);
+        bubble.add(header, message, footer);
         row.add(bubble);
         messagesLayout.add(row);
         scrollToBottom();
 
-        return new PendingAssistantMessage(model, message);
+        return new PendingAssistantMessage(model, message, timestamp, loading);
     }
 
-    private void addAssistantMessage(String model, String message) {
+    private void addAssistantMessage(String model, String message, String timestamp) {
         HorizontalLayout row = new HorizontalLayout();
         row.setWidthFull();
         row.setJustifyContentMode(JustifyContentMode.START);
@@ -290,9 +325,12 @@ public class ChatView extends VerticalLayout {
         renderAssistantText(messageText, message);
         messageText.getStyle().set("white-space", "pre-wrap");
         messageText.getStyle().set("margin-top", "6px");
+        Span timestampText = createTimestampLabel(timestamp);
+        timestampText.getStyle().set("margin-top", "8px");
+        timestampText.getStyle().set("display", "block");
 
         header.add(name, modelLabel);
-        bubble.add(header, messageText);
+        bubble.add(header, messageText, timestampText);
         row.add(bubble);
         messagesLayout.add(row);
         scrollToBottom();
@@ -340,6 +378,18 @@ public class ChatView extends VerticalLayout {
         return "Unable to reach chat API right now.";
     }
 
+    private String resolveChatApiErrorMessage(RestClientResponseException ex, String fallbackMessage) {
+        try {
+            Chat.ChatErrorResponse errorBody = ex.getResponseBodyAs(Chat.ChatErrorResponse.class);
+            if (errorBody != null && errorBody.message() != null && !errorBody.message().isBlank()) {
+                return errorBody.message();
+            }
+        } catch (Exception ignored) {
+            // Fall through to fallback message if response body can't be parsed.
+        }
+        return fallbackMessage;
+    }
+
     private void renderAssistantText(Div target, String text) {
         target.getElement().setProperty("innerHTML", toSafeHtml(text));
     }
@@ -359,7 +409,19 @@ public class ChatView extends VerticalLayout {
         return withBold.replace("\n", "<br/>");
     }
 
-    private record PendingAssistantMessage(Span model, Div message) {
+    private String formatTimestamp(Instant instant) {
+        Instant safeInstant = instant == null ? Instant.now() : instant;
+        return CHAT_TIME_FORMATTER.format(safeInstant.atZone(ZoneId.systemDefault()));
+    }
+
+    private Span createTimestampLabel(String text) {
+        Span timestamp = new Span(text);
+        timestamp.getStyle().set("font-size", "0.72rem");
+        timestamp.getStyle().set("color", "#94a3b8");
+        return timestamp;
+    }
+
+    private record PendingAssistantMessage(Span model, Div message, Span timestamp, ProgressBar loading) {
     }
 
     private static class UiChatException extends RuntimeException {

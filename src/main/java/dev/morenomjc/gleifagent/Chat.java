@@ -30,12 +30,14 @@ import java.util.regex.Pattern;
 public class Chat {
 
     private static final Pattern LEI_PATTERN = Pattern.compile("\\b[A-Z0-9]{20}\\b");
+    private static final Pattern RAW_TOOL_CALL_PATTERN = Pattern.compile(
+            "CALL>\\s*\\[\\s*\\{.*\"name\"\\s*:\\s*\"get_lei_details\".*}\\s*]\\s*CALL>",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+    );
     private static final String INTERNAL_WELCOME_PROMPT_PREFIX =
             "Provide a short welcome message and include which holiday is on this exact date.";
-    private static final String UNSUPPORTED_PROMPT_GENERIC_MESSAGE =
-            "Unsupported request. This chat currently supports LEI detail lookup for one LEI code per request.";
-
     private final ChatClient chatClient;
+    private final UnsupportedPromptReasonService unsupportedPromptReasonService;
     @Value("${spring.ai.openai.chat.options.model:unknown}")
     private String configuredModel;
 
@@ -72,6 +74,7 @@ public class Chat {
                     .map(output -> output.getText())
                     .orElse("");
             String model = resolveModel(chatResponse);
+            reply = normalizeReply(reply, model);
             String responseId = Optional.ofNullable(chatResponse.getMetadata())
                     .map(metadata -> metadata.getId())
                     .orElse(null);
@@ -117,7 +120,7 @@ public class Chat {
         log.info("Rejected unsupported prompt: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(new ChatErrorResponse(
                 "UNSUPPORTED_PROMPT",
-                UNSUPPORTED_PROMPT_GENERIC_MESSAGE,
+                unsupportedPromptReasonService.randomReason(),
                 Instant.now()
         ));
     }
@@ -127,6 +130,17 @@ public class Chat {
                 .map(metadata -> metadata.getModel())
                 .filter(model -> !model.isBlank())
                 .orElse(configuredModel);
+    }
+
+    private String normalizeReply(String reply, String model) {
+        if (reply == null || reply.isBlank()) {
+            return reply;
+        }
+        if (RAW_TOOL_CALL_PATTERN.matcher(reply).find()) {
+            log.warn("Model returned raw tool-call text instead of executing tool. model={}", model);
+            return "Tool calling is unsupported by the current model. Please switch to a tool-capable model.";
+        }
+        return reply;
     }
 
     private void validateSupportedPrompt(String prompt) {
