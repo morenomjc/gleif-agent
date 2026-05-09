@@ -2,32 +2,39 @@ package dev.morenomjc.gleifagent;
 
 import com.vaadin.flow.component.AttachEvent;
 import com.vaadin.flow.component.UI;
-import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.H2;
 import com.vaadin.flow.component.html.Span;
-import com.vaadin.flow.component.icon.Icon;
-import com.vaadin.flow.component.icon.VaadinIcon;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.Scroller;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
-import com.vaadin.flow.component.textfield.TextArea;
+import com.vaadin.flow.component.messages.MessageInput;
+import com.vaadin.flow.component.messages.MessageInputI18n;
 import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.server.VaadinSession;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.regex.Pattern;
 
 @Route("")
 @PageTitle("Chat")
 public class ChatView extends VerticalLayout {
 
-    private static final String WELCOME_SESSION_KEY = "chat.welcome.shown";
+    private static final String WELCOME_MESSAGE_SESSION_KEY = "chat.welcome.message";
+    private static final String WELCOME_MODEL_SESSION_KEY = "chat.welcome.model";
+    private static final String WELCOME_FALLBACK = "Welcome! I am Gandalf. I can help you look up LEI details.";
+    private static final String EMPTY_REPLY_FALLBACK = "I received an empty response. Please try again.";
+    private static final String UNSUPPORTED_PROMPT_GENERIC_MESSAGE =
+            "Unsupported request. Please provide one LEI code (20 alphanumeric characters).";
+    private static final String AI_PROVIDER_ERROR_MESSAGE =
+            "AI provider error. Please verify OPENAI/OpenRouter credentials and try again.";
+    private static final Pattern BOLD_MARKDOWN = Pattern.compile("\\*\\*(.+?)\\*\\*");
     private static final String[] FUNNY_LOADING_VERBS = {
             "Consulting the crystal ball...",
             "Polishing the wizard staff...",
@@ -40,10 +47,10 @@ public class ChatView extends VerticalLayout {
     };
 
     private final RestClient restClient;
+    private final String configuredModelName;
     private final VerticalLayout messagesLayout = new VerticalLayout();
     private final Scroller messagesScroller;
-    private final TextArea messageInput = new TextArea("Message");
-    private final Button sendButton = new Button(new Icon(VaadinIcon.PAPERPLANE));
+    private final MessageInput composer = new MessageInput();
 
     public ChatView(
             RestClient.Builder restClientBuilder,
@@ -51,6 +58,7 @@ public class ChatView extends VerticalLayout {
             @Value("${spring.ai.openai.chat.options.model:unknown}") String modelName
     ) {
         this.restClient = restClientBuilder.baseUrl("http://localhost:" + serverPort).build();
+        this.configuredModelName = modelName;
 
         setSizeFull();
         setPadding(true);
@@ -83,86 +91,108 @@ public class ChatView extends VerticalLayout {
         add(this.messagesScroller);
         expand(this.messagesScroller);
 
-        messageInput.setWidthFull();
-        messageInput.setMaxLength(4000);
-        messageInput.setPlaceholder("Ask Gandalf anything...");
-        messageInput.setMinHeight("80px");
-        messageInput.setMaxHeight("180px");
-        messageInput.setClearButtonVisible(true);
-        messageInput.getStyle().set("background", "#ffffff");
-        messageInput.getStyle().set("border-radius", "12px");
-
-        sendButton.addClickListener(event -> sendMessage());
-        sendButton.getStyle().set("background", "#0f172a");
-        sendButton.getStyle().set("color", "#ffffff");
-        sendButton.getStyle().set("border-radius", "10px");
-        sendButton.getElement().setProperty("title", "Send");
-        sendButton.getElement().setProperty("aria-label", "Send message");
-
-        HorizontalLayout inputLayout = new HorizontalLayout(messageInput, sendButton);
-        inputLayout.setWidthFull();
-        inputLayout.setFlexGrow(1, messageInput);
-        inputLayout.setAlignItems(Alignment.END);
-        add(inputLayout);
+        MessageInputI18n i18n = new MessageInputI18n();
+        i18n.setMessage("Ask Gandalf anything...");
+        i18n.setSend("Send");
+        composer.setI18n(i18n);
+        composer.setWidthFull();
+        composer.addSubmitListener(event -> sendMessage(event.getValue()));
+        add(composer);
     }
 
     @Override
     protected void onAttach(AttachEvent attachEvent) {
-        Boolean welcomeShown = (Boolean) VaadinSession.getCurrent().getAttribute(WELCOME_SESSION_KEY);
-        if (Boolean.TRUE.equals(welcomeShown)) {
+        String cachedWelcomeMessage = (String) VaadinSession.getCurrent().getAttribute(WELCOME_MESSAGE_SESSION_KEY);
+        if (cachedWelcomeMessage != null && !cachedWelcomeMessage.isBlank()) {
+            String cachedWelcomeModel = (String) VaadinSession.getCurrent().getAttribute(WELCOME_MODEL_SESSION_KEY);
+            addAssistantMessage(
+                    cachedWelcomeModel == null || cachedWelcomeModel.isBlank() ? configuredModelName : cachedWelcomeModel,
+                    cachedWelcomeMessage
+            );
             return;
         }
-        VaadinSession.getCurrent().setAttribute(WELCOME_SESSION_KEY, true);
-        requestAssistantMessage(buildWelcomePrompt());
+        requestAssistantMessage(buildWelcomePrompt(), true);
     }
 
-    private void sendMessage() {
-        String userMessage = messageInput.getValue() == null ? "" : messageInput.getValue().trim();
+    private void sendMessage(String rawMessage) {
+        String userMessage = rawMessage == null ? "" : rawMessage.trim();
         if (userMessage.isEmpty()) {
             return;
         }
 
         addUserMessage(userMessage);
-        messageInput.clear();
-        requestAssistantMessage(userMessage);
+        requestAssistantMessage(userMessage, false);
     }
 
-    private void requestAssistantMessage(String prompt) {
+    private void requestAssistantMessage(String prompt, boolean welcomeMessage) {
         UI ui = UI.getCurrent();
         if (ui == null) {
             return;
         }
 
         PendingAssistantMessage pendingMessage = addPendingGandalfMessage();
-        sendButton.setEnabled(false);
-        messageInput.setEnabled(false);
+        boolean disableComposer = true;
+        if (disableComposer) {
+            composer.setEnabled(false);
+        }
 
         CompletableFuture.supplyAsync(() -> callChatEndpoint(prompt))
                 .whenComplete((response, throwable) -> ui.access(() -> {
                     if (throwable != null) {
                         pendingMessage.model.setText("");
-                        pendingMessage.message.setText("Unable to reach chat API: " + throwable.getMessage());
+                        renderAssistantText(pendingMessage.message, resolveUiErrorMessage(throwable));
                     } else {
-                        pendingMessage.model.setText(response.model());
-                        pendingMessage.message.setText(response.reply());
+                        String model = response.model() == null || response.model().isBlank()
+                                ? configuredModelName
+                                : response.model();
+                        String message = sanitizeReply(response.reply(), welcomeMessage);
+
+                        pendingMessage.model.setText(model);
+                        renderAssistantText(pendingMessage.message, message);
+                        if (welcomeMessage) {
+                            VaadinSession.getCurrent().setAttribute(WELCOME_MODEL_SESSION_KEY, model);
+                            VaadinSession.getCurrent().setAttribute(WELCOME_MESSAGE_SESSION_KEY, message);
+                        }
                     }
-                    sendButton.setEnabled(true);
-                    messageInput.setEnabled(true);
+                    if (disableComposer) {
+                        composer.setEnabled(true);
+                    }
                     scrollToBottom();
                 }));
     }
 
     private Chat.ChatSuccessResponse callChatEndpoint(String prompt) {
         Chat.ChatRequest request = new Chat.ChatRequest(prompt);
-        Chat.ChatSuccessResponse response = restClient.post()
-                .uri("/chat")
-                .body(request)
-                .retrieve()
-                .body(Chat.ChatSuccessResponse.class);
-        if (response == null) {
-            throw new IllegalStateException("Chat API returned an empty response.");
+        try {
+            Chat.ChatSuccessResponse response = restClient.post()
+                    .uri("/chat")
+                    .body(request)
+                    .retrieve()
+                    .body(Chat.ChatSuccessResponse.class);
+            if (response == null) {
+                throw new IllegalStateException("Chat API returned an empty response.");
+            }
+            return response;
+        } catch (RestClientResponseException ex) {
+            int statusCode = ex.getStatusCode().value();
+            if (statusCode == 422) {
+                throw new UiChatException(UNSUPPORTED_PROMPT_GENERIC_MESSAGE);
+            }
+            if (statusCode == 502) {
+                throw new UiChatException(AI_PROVIDER_ERROR_MESSAGE);
+            }
+            if (statusCode == 400) {
+                throw new UiChatException("Invalid chat request. Please try again.");
+            }
+            throw new UiChatException("Unable to reach chat API right now.");
         }
-        return response;
+    }
+
+    private String sanitizeReply(String reply, boolean welcomeMessage) {
+        if (reply == null || reply.isBlank()) {
+            return welcomeMessage ? WELCOME_FALLBACK : EMPTY_REPLY_FALLBACK;
+        }
+        return reply;
     }
 
     private void addUserMessage(String message) {
@@ -227,6 +257,47 @@ public class ChatView extends VerticalLayout {
         return new PendingAssistantMessage(model, message);
     }
 
+    private void addAssistantMessage(String model, String message) {
+        HorizontalLayout row = new HorizontalLayout();
+        row.setWidthFull();
+        row.setJustifyContentMode(JustifyContentMode.START);
+
+        Div bubble = new Div();
+        bubble.getStyle().set("max-width", "75%");
+        bubble.getStyle().set("background", "#ffffff");
+        bubble.getStyle().set("color", "#0f172a");
+        bubble.getStyle().set("padding", "10px 12px");
+        bubble.getStyle().set("border-radius", "12px");
+        bubble.getStyle().set("border", "1px solid #e2e8f0");
+
+        HorizontalLayout header = new HorizontalLayout();
+        header.setWidthFull();
+        header.setPadding(false);
+        header.setSpacing(false);
+        header.setAlignItems(Alignment.CENTER);
+        header.setJustifyContentMode(JustifyContentMode.BETWEEN);
+
+        Span name = new Span("Gandalf");
+        name.getStyle().set("font-weight", "600");
+
+        Span modelLabel = new Span(model);
+        modelLabel.getStyle().set("font-size", "0.74rem");
+        modelLabel.getStyle().set("color", "#94a3b8");
+        modelLabel.getStyle().set("margin-left", "16px");
+        modelLabel.getStyle().set("text-align", "right");
+
+        Div messageText = new Div();
+        renderAssistantText(messageText, message);
+        messageText.getStyle().set("white-space", "pre-wrap");
+        messageText.getStyle().set("margin-top", "6px");
+
+        header.add(name, modelLabel);
+        bubble.add(header, messageText);
+        row.add(bubble);
+        messagesLayout.add(row);
+        scrollToBottom();
+    }
+
     private void addSystemMessage(String message) {
         HorizontalLayout row = new HorizontalLayout();
         row.setWidthFull();
@@ -258,6 +329,42 @@ public class ChatView extends VerticalLayout {
                 """.formatted(today);
     }
 
+    private String resolveUiErrorMessage(Throwable throwable) {
+        Throwable root = throwable;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+        if (root instanceof UiChatException uiChatException) {
+            return uiChatException.getMessage();
+        }
+        return "Unable to reach chat API right now.";
+    }
+
+    private void renderAssistantText(Div target, String text) {
+        target.getElement().setProperty("innerHTML", toSafeHtml(text));
+    }
+
+    private String toSafeHtml(String text) {
+        if (text == null) {
+            return "";
+        }
+
+        String escaped = text
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
+        String withBold = BOLD_MARKDOWN.matcher(escaped).replaceAll("<strong>$1</strong>");
+        return withBold.replace("\n", "<br/>");
+    }
+
     private record PendingAssistantMessage(Span model, Div message) {
+    }
+
+    private static class UiChatException extends RuntimeException {
+        private UiChatException(String message) {
+            super(message);
+        }
     }
 }
