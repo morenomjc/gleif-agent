@@ -14,6 +14,10 @@ import com.vaadin.flow.component.messages.MessageInputI18n;
 import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.server.VaadinSession;
+import org.commonmark.Extension;
+import org.commonmark.ext.gfm.tables.TablesExtension;
+import org.commonmark.parser.Parser;
+import org.commonmark.renderer.html.HtmlRenderer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
@@ -22,9 +26,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.regex.Pattern;
 
 @Route("")
 @PageTitle("Chat")
@@ -39,7 +43,6 @@ public class ChatView extends VerticalLayout {
             "Unsupported request. This chat currently supports LEI detail lookup for one LEI code per request.";
     private static final String AI_PROVIDER_ERROR_MESSAGE =
             "AI provider error. Please verify OPENAI/OpenRouter credentials and try again.";
-    private static final Pattern BOLD_MARKDOWN = Pattern.compile("\\*\\*(.+?)\\*\\*");
     private static final String[] FUNNY_LOADING_VERBS = {
             "Consulting the crystal ball...",
             "Polishing the wizard staff...",
@@ -51,9 +54,18 @@ public class ChatView extends VerticalLayout {
             "Untangling prophecy..."
     };
     private static final DateTimeFormatter CHAT_TIME_FORMATTER = DateTimeFormatter.ofPattern("h:mm a");
+    private static final List<Extension> MARKDOWN_EXTENSIONS = List.of(TablesExtension.create());
+    private static final Parser MARKDOWN_PARSER = Parser.builder()
+            .extensions(MARKDOWN_EXTENSIONS)
+            .build();
+    private static final HtmlRenderer MARKDOWN_RENDERER = HtmlRenderer.builder()
+            .escapeHtml(true)
+            .extensions(MARKDOWN_EXTENSIONS)
+            .build();
 
     private final RestClient restClient;
     private final String configuredModelName;
+    private final VerticalLayout chatPanel = new VerticalLayout();
     private final VerticalLayout messagesLayout = new VerticalLayout();
     private final Scroller messagesScroller;
     private final MessageInput composer = new MessageInput();
@@ -67,43 +79,76 @@ public class ChatView extends VerticalLayout {
         this.configuredModelName = modelName;
 
         setSizeFull();
-        setPadding(true);
-        setSpacing(true);
+        setPadding(false);
+        setSpacing(false);
+        setAlignItems(Alignment.CENTER);
+        getStyle().set("font-family", "\"Avenir Next\", \"Helvetica Neue\", sans-serif");
+        getStyle().set("background",
+                "radial-gradient(circle at 20% 10%, #1f2937 0%, #0f172a 45%, #020617 100%)");
+        getStyle().set("padding", "24px 16px");
+        getStyle().set("box-sizing", "border-box");
+
+        chatPanel.setWidthFull();
+        chatPanel.setHeightFull();
+        chatPanel.setPadding(false);
+        chatPanel.setSpacing(true);
+        chatPanel.setMaxWidth("980px");
+        chatPanel.getStyle().set("background", "linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)");
+        chatPanel.getStyle().set("border", "1px solid rgba(148, 163, 184, 0.35)");
+        chatPanel.getStyle().set("border-radius", "22px");
+        chatPanel.getStyle().set("padding", "20px");
+        chatPanel.getStyle().set("box-shadow", "0 28px 65px rgba(2, 6, 23, 0.45)");
+        chatPanel.getStyle().set("backdrop-filter", "blur(2px)");
+        add(chatPanel);
 
         H2 title = new H2("GLEIF Agent Chat");
-        add(title);
+        title.getStyle().set("margin", "2px 0 4px");
+        title.getStyle().set("font-size", "1.65rem");
+        title.getStyle().set("font-family", "\"Avenir Next Condensed\", \"Gill Sans\", sans-serif");
+        title.getStyle().set("letter-spacing", "0.02em");
+        title.getStyle().set("color", "#0f172a");
+        chatPanel.add(title);
 
         Div notice = new Div();
         notice.setText("Gandalf is fighting the Balrog. Responses may be slow.");
-        notice.getStyle().set("background", "#fff7ed");
-        notice.getStyle().set("color", "#9a3412");
+        notice.getStyle().set("background", "linear-gradient(90deg, #ffedd5 0%, #fef3c7 100%)");
+        notice.getStyle().set("color", "#7c2d12");
         notice.getStyle().set("border", "1px solid #fdba74");
-        notice.getStyle().set("border-radius", "10px");
-        notice.getStyle().set("padding", "8px 10px");
+        notice.getStyle().set("border-radius", "12px");
+        notice.getStyle().set("padding", "10px 12px");
         notice.getStyle().set("font-size", "0.85rem");
+        notice.getStyle().set("font-weight", "600");
         notice.getStyle().set("box-sizing", "border-box");
         notice.setWidthFull();
-        add(notice);
+        chatPanel.add(notice);
 
         messagesLayout.setWidthFull();
         messagesLayout.setPadding(false);
-        messagesLayout.setSpacing(true);
-        messagesLayout.getStyle().set("background", "#f8fafc");
-        messagesLayout.getStyle().set("border", "1px solid #e2e8f0");
-        messagesLayout.getStyle().set("border-radius", "14px");
-        messagesLayout.getStyle().set("padding", "16px");
+        messagesLayout.setSpacing(false);
+        messagesLayout.getStyle().set("background",
+                "linear-gradient(180deg, rgba(15, 23, 42, 0.03) 0%, rgba(15, 23, 42, 0.08) 100%)");
+        messagesLayout.getStyle().set("border", "1px solid #cbd5e1");
+        messagesLayout.getStyle().set("border-radius", "16px");
+        messagesLayout.getStyle().set("padding", "18px");
+        messagesLayout.getStyle().set("gap", "12px");
         this.messagesScroller = new Scroller(messagesLayout);
         this.messagesScroller.setSizeFull();
-        add(this.messagesScroller);
-        expand(this.messagesScroller);
+        this.messagesScroller.getStyle().set("border-radius", "16px");
+        chatPanel.add(this.messagesScroller);
+        chatPanel.expand(this.messagesScroller);
 
         MessageInputI18n i18n = new MessageInputI18n();
-        i18n.setMessage("Ask Gandalf anything...");
+        i18n.setMessage("Ask Gandalf ...");
         i18n.setSend("Send");
         composer.setI18n(i18n);
         composer.setWidthFull();
+        composer.getStyle().set("border", "1px solid #cbd5e1");
+        composer.getStyle().set("border-radius", "14px");
+        composer.getStyle().set("background", "#ffffff");
+        composer.getStyle().set("padding", "6px");
+        composer.getStyle().set("box-shadow", "0 8px 18px rgba(15, 23, 42, 0.08)");
         composer.addSubmitListener(event -> sendMessage(event.getValue()));
-        add(composer);
+        chatPanel.add(composer);
     }
 
     @Override
@@ -170,6 +215,9 @@ public class ChatView extends VerticalLayout {
                     }
                     if (disableComposer) {
                         composer.setEnabled(true);
+                        if (!welcomeMessage) {
+                            composer.focus();
+                        }
                     }
                     scrollToBottom();
                 }));
@@ -213,13 +261,16 @@ public class ChatView extends VerticalLayout {
         HorizontalLayout row = new HorizontalLayout();
         row.setWidthFull();
         row.setJustifyContentMode(JustifyContentMode.END);
+        row.getStyle().set("margin", "0");
 
         Div bubble = new Div();
         bubble.getStyle().set("max-width", "75%");
-        bubble.getStyle().set("background", "#dbeafe");
-        bubble.getStyle().set("color", "#0f172a");
-        bubble.getStyle().set("padding", "10px 12px");
-        bubble.getStyle().set("border-radius", "12px");
+        bubble.getStyle().set("background", "linear-gradient(160deg, #0f172a 0%, #1e293b 100%)");
+        bubble.getStyle().set("color", "#e2e8f0");
+        bubble.getStyle().set("padding", "12px 14px");
+        bubble.getStyle().set("border-radius", "14px 14px 4px 14px");
+        bubble.getStyle().set("border", "1px solid rgba(148, 163, 184, 0.25)");
+        bubble.getStyle().set("box-shadow", "0 10px 24px rgba(15, 23, 42, 0.16)");
         Span messageText = new Span(message);
         messageText.getStyle().set("white-space", "pre-wrap");
         messageText.getStyle().set("display", "block");
@@ -227,6 +278,7 @@ public class ChatView extends VerticalLayout {
         timestamp.getStyle().set("text-align", "right");
         timestamp.getStyle().set("margin-top", "8px");
         timestamp.getStyle().set("display", "block");
+        timestamp.getStyle().set("color", "#cbd5e1");
         bubble.add(messageText, timestamp);
 
         row.add(bubble);
@@ -238,14 +290,16 @@ public class ChatView extends VerticalLayout {
         HorizontalLayout row = new HorizontalLayout();
         row.setWidthFull();
         row.setJustifyContentMode(JustifyContentMode.START);
+        row.getStyle().set("margin", "0");
 
         Div bubble = new Div();
         bubble.getStyle().set("max-width", "75%");
-        bubble.getStyle().set("background", "#ffffff");
+        bubble.getStyle().set("background", "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)");
         bubble.getStyle().set("color", "#0f172a");
-        bubble.getStyle().set("padding", "10px 12px");
-        bubble.getStyle().set("border-radius", "12px");
-        bubble.getStyle().set("border", "1px solid #e2e8f0");
+        bubble.getStyle().set("padding", "12px 14px");
+        bubble.getStyle().set("border-radius", "14px 14px 14px 4px");
+        bubble.getStyle().set("border", "1px solid #cbd5e1");
+        bubble.getStyle().set("box-shadow", "0 10px 24px rgba(15, 23, 42, 0.08)");
 
         HorizontalLayout header = new HorizontalLayout();
         header.setWidthFull();
@@ -296,14 +350,16 @@ public class ChatView extends VerticalLayout {
         HorizontalLayout row = new HorizontalLayout();
         row.setWidthFull();
         row.setJustifyContentMode(JustifyContentMode.START);
+        row.getStyle().set("margin", "0");
 
         Div bubble = new Div();
         bubble.getStyle().set("max-width", "75%");
-        bubble.getStyle().set("background", "#ffffff");
+        bubble.getStyle().set("background", "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)");
         bubble.getStyle().set("color", "#0f172a");
-        bubble.getStyle().set("padding", "10px 12px");
-        bubble.getStyle().set("border-radius", "12px");
-        bubble.getStyle().set("border", "1px solid #e2e8f0");
+        bubble.getStyle().set("padding", "12px 14px");
+        bubble.getStyle().set("border-radius", "14px 14px 14px 4px");
+        bubble.getStyle().set("border", "1px solid #cbd5e1");
+        bubble.getStyle().set("box-shadow", "0 10px 24px rgba(15, 23, 42, 0.08)");
 
         HorizontalLayout header = new HorizontalLayout();
         header.setWidthFull();
@@ -392,21 +448,62 @@ public class ChatView extends VerticalLayout {
 
     private void renderAssistantText(Div target, String text) {
         target.getElement().setProperty("innerHTML", toSafeHtml(text));
+        target.getElement().executeJs("""
+                const root = this;
+                root.querySelectorAll('table').forEach((table) => {
+                  table.style.width = '100%';
+                  table.style.borderCollapse = 'collapse';
+                  table.style.marginTop = '8px';
+                  table.style.marginBottom = '8px';
+                  table.style.fontSize = '0.9rem';
+                });
+                root.querySelectorAll('th, td').forEach((cell) => {
+                  cell.style.border = '1px solid #cbd5e1';
+                  cell.style.padding = '6px 8px';
+                  cell.style.textAlign = 'left';
+                  cell.style.verticalAlign = 'top';
+                });
+                root.querySelectorAll('th').forEach((th) => {
+                  th.style.background = '#e2e8f0';
+                  th.style.fontWeight = '600';
+                });
+                root.querySelectorAll('pre').forEach((pre) => {
+                  pre.style.background = '#0f172a';
+                  pre.style.color = '#e2e8f0';
+                  pre.style.padding = '10px';
+                  pre.style.borderRadius = '8px';
+                  pre.style.overflowX = 'auto';
+                });
+                root.querySelectorAll('code').forEach((code) => {
+                  if (code.parentElement && code.parentElement.tagName === 'PRE') {
+                    return;
+                  }
+                  code.style.background = '#e2e8f0';
+                  code.style.padding = '1px 4px';
+                  code.style.borderRadius = '4px';
+                });
+                root.querySelectorAll('blockquote').forEach((quote) => {
+                  quote.style.margin = '8px 0';
+                  quote.style.padding = '4px 10px';
+                  quote.style.borderLeft = '3px solid #94a3b8';
+                  quote.style.color = '#334155';
+                });
+                root.querySelectorAll('ul, ol').forEach((list) => {
+                  list.style.paddingLeft = '20px';
+                  list.style.marginTop = '8px';
+                  list.style.marginBottom = '8px';
+                });
+                root.querySelectorAll('p').forEach((p) => {
+                  p.style.margin = '0 0 8px 0';
+                });
+                """);
     }
 
     private String toSafeHtml(String text) {
         if (text == null) {
             return "";
         }
-
-        String escaped = text
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#39;");
-        String withBold = BOLD_MARKDOWN.matcher(escaped).replaceAll("<strong>$1</strong>");
-        return withBold.replace("\n", "<br/>");
+        return MARKDOWN_RENDERER.render(MARKDOWN_PARSER.parse(text));
     }
 
     private String formatTimestamp(Instant instant) {

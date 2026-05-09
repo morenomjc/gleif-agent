@@ -34,6 +34,14 @@ public class Chat {
             "CALL>\\s*\\[\\s*\\{.*\"name\"\\s*:\\s*\"get_lei_details\".*}\\s*]\\s*CALL>",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL
     );
+    private static final Pattern RAW_TOOL_CALL_JSON_PATTERN = Pattern.compile(
+            "^\\s*\\[\\s*\\{\\s*\"name\"\\s*:\\s*\"get_lei_details\".*}]\\s*(?:</TOOLCALL>\\s*)?$",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+    );
+    private static final Pattern RAW_TOOL_CALL_TAGGED_PATTERN = Pattern.compile(
+            "^\\s*<TOOLCALL>\\s*\\[\\s*\\{\\s*\"name\"\\s*:\\s*\"get_lei_details\".*}]\\s*(?:</TOOLCALL>\\s*)?$",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+    );
     private static final String INTERNAL_WELCOME_PROMPT_PREFIX =
             "Provide a short welcome message and include which holiday is on this exact date.";
     private final ChatClient chatClient;
@@ -136,7 +144,9 @@ public class Chat {
         if (reply == null || reply.isBlank()) {
             return reply;
         }
-        if (RAW_TOOL_CALL_PATTERN.matcher(reply).find()) {
+        if (RAW_TOOL_CALL_PATTERN.matcher(reply).find()
+                || RAW_TOOL_CALL_JSON_PATTERN.matcher(reply).find()
+                || RAW_TOOL_CALL_TAGGED_PATTERN.matcher(reply).find()) {
             log.warn("Model returned raw tool-call text instead of executing tool. model={}", model);
             return "Tool calling is unsupported by the current model. Please switch to a tool-capable model.";
         }
