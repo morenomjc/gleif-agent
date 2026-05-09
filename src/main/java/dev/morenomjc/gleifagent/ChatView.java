@@ -43,14 +43,25 @@ public class ChatView extends VerticalLayout {
     private static final String AI_PROVIDER_ERROR_MESSAGE =
             "AI provider error. Please verify OPENAI/OpenRouter credentials and try again.";
     private static final String[] FUNNY_LOADING_VERBS = {
-            "Consulting the crystal ball...",
-            "Polishing the wizard staff...",
-            "Reading ancient runes...",
-            "Summoning better words...",
-            "Negotiating with dragons...",
-            "Stirring the potion...",
-            "Aligning moonbeams...",
-            "Untangling prophecy..."
+            "Recalling lore from the archives of Minas Tirith...",
+            "Listening for whispers carried from the East...",
+            "Checking if this would pass in the Council of Elrond...",
+            "Reviewing notes from Bilbo's red book...",
+            "Consulting the runes before speaking plainly...",
+            "Choosing words fit for hobbits and kings alike...",
+            "Ensuring this answer would satisfy Lady Galadriel...",
+            "Peering a little too long into the palantir...",
+            "Sending a quick thought to Orthanc, then reconsidering...",
+            "Confirming this with the Eagles, just in case...",
+            "Sorting useful facts from Took-level mischief...",
+            "Debating whether to reveal this at first light or dawn...",
+            "Checking if this belongs in a chapter by Tolkien...",
+            "Walking the long road from the Shire to the point...",
+            "Making sure even a dwarf would call this practical...",
+            "Translating from wizardly mutterings into plain speech...",
+            "Testing this answer against second breakfast logic...",
+            "Waiting for Saruman to stop being confidently wrong...",
+            "Dusting off a footnote from Rivendell's older shelves..."
     };
     private static final DateTimeFormatter CHAT_TIME_FORMATTER = DateTimeFormatter.ofPattern("h:mm a");
     private static final List<Extension> MARKDOWN_EXTENSIONS = List.of(TablesExtension.create());
