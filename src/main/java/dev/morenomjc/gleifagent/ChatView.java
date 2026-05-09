@@ -5,7 +5,6 @@ import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.H2;
 import com.vaadin.flow.component.html.Span;
-import com.vaadin.flow.component.progressbar.ProgressBar;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.Scroller;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
@@ -60,6 +59,7 @@ public class ChatView extends VerticalLayout {
             .build();
     private static final HtmlRenderer MARKDOWN_RENDERER = HtmlRenderer.builder()
             .escapeHtml(true)
+            .softbreak("<br/>")
             .extensions(MARKDOWN_EXTENSIONS)
             .build();
 
@@ -67,6 +67,7 @@ public class ChatView extends VerticalLayout {
     private final String configuredModelName;
     private final VerticalLayout chatPanel = new VerticalLayout();
     private final VerticalLayout messagesLayout = new VerticalLayout();
+    private final Div composerShell = new Div();
     private final Scroller messagesScroller;
     private final MessageInput composer = new MessageInput();
 
@@ -93,6 +94,7 @@ public class ChatView extends VerticalLayout {
         chatPanel.setPadding(false);
         chatPanel.setSpacing(true);
         chatPanel.setMaxWidth("980px");
+        chatPanel.addClassName("wizard-chat-panel");
         chatPanel.getStyle().set("background", "linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)");
         chatPanel.getStyle().set("border", "1px solid rgba(148, 163, 184, 0.35)");
         chatPanel.getStyle().set("border-radius", "22px");
@@ -125,6 +127,7 @@ public class ChatView extends VerticalLayout {
         messagesLayout.setWidthFull();
         messagesLayout.setPadding(false);
         messagesLayout.setSpacing(false);
+        messagesLayout.addClassName("wizard-messages");
         messagesLayout.getStyle().set("background",
                 "linear-gradient(180deg, rgba(15, 23, 42, 0.03) 0%, rgba(15, 23, 42, 0.08) 100%)");
         messagesLayout.getStyle().set("border", "1px solid #cbd5e1");
@@ -142,13 +145,29 @@ public class ChatView extends VerticalLayout {
         i18n.setSend("Send");
         composer.setI18n(i18n);
         composer.setWidthFull();
-        composer.getStyle().set("border", "1px solid #cbd5e1");
-        composer.getStyle().set("border-radius", "14px");
-        composer.getStyle().set("background", "#ffffff");
-        composer.getStyle().set("padding", "6px");
-        composer.getStyle().set("box-shadow", "0 8px 18px rgba(15, 23, 42, 0.08)");
+        composer.addClassName("wizard-composer");
+        composer.getStyle().set("border", "0");
+        composer.getStyle().set("border-radius", "12px");
+        composer.getStyle().set("background", "transparent");
+        composer.getStyle().set("padding", "0");
+        composer.getStyle().set("box-shadow", "none");
+        composer.getStyle().set("margin", "0");
         composer.addSubmitListener(event -> sendMessage(event.getValue()));
-        chatPanel.add(composer);
+
+        composerShell.setWidthFull();
+        composerShell.addClassName("wizard-composer-shell");
+        composerShell.getStyle().set("background",
+                "linear-gradient(180deg, rgba(15, 23, 42, 0.03) 0%, rgba(15, 23, 42, 0.08) 100%)");
+        composerShell.getStyle().set("border", "1px solid #cbd5e1");
+        composerShell.getStyle().set("border-radius", "16px");
+        composerShell.getStyle().set("padding-top", "6px");
+        composerShell.getStyle().set("padding-right", "8px");
+        composerShell.getStyle().set("padding-bottom", "12px");
+        composerShell.getStyle().set("padding-left", "8px");
+        composerShell.getStyle().set("box-shadow", "0 8px 18px rgba(15, 23, 42, 0.08)");
+        composerShell.getStyle().set("box-sizing", "border-box");
+        composerShell.add(composer);
+        chatPanel.add(composerShell);
     }
 
     @Override
@@ -254,7 +273,7 @@ public class ChatView extends VerticalLayout {
         if (reply == null || reply.isBlank()) {
             return welcomeMessage ? WELCOME_FALLBACK : EMPTY_REPLY_FALLBACK;
         }
-        return reply;
+        return reply.stripTrailing();
     }
 
     private void addUserMessage(String message) {
@@ -314,30 +333,32 @@ public class ChatView extends VerticalLayout {
         Span model = new Span("");
         model.getStyle().set("font-size", "0.74rem");
         model.getStyle().set("color", "#94a3b8");
-        model.getStyle().set("margin-left", "16px");
+        model.getStyle().set("margin-left", "10px");
         model.getStyle().set("text-align", "right");
 
         Div message = new Div();
         message.setText(funnyLoadingText());
-        message.getStyle().set("white-space", "pre-wrap");
-        message.getStyle().set("margin-top", "6px");
+        message.getStyle().set("white-space", "normal");
+        message.getStyle().set("margin-top", "4px");
+
+        Div loading = createThinkingLoader();
+        HorizontalLayout rightMeta = new HorizontalLayout(model, loading);
+        rightMeta.setPadding(false);
+        rightMeta.setSpacing(true);
+        rightMeta.setAlignItems(Alignment.CENTER);
+        rightMeta.setJustifyContentMode(JustifyContentMode.END);
 
         HorizontalLayout footer = new HorizontalLayout();
         footer.setWidthFull();
         footer.setPadding(false);
-        footer.setSpacing(true);
+        footer.setSpacing(false);
         footer.setAlignItems(Alignment.CENTER);
-        footer.setJustifyContentMode(JustifyContentMode.BETWEEN);
-        footer.getStyle().set("margin-top", "8px");
-
+        footer.setJustifyContentMode(JustifyContentMode.START);
+        footer.getStyle().set("margin-top", "4px");
         Span timestamp = createTimestampLabel("");
-        ProgressBar loading = new ProgressBar();
-        loading.setIndeterminate(true);
-        loading.getStyle().set("width", "48px");
-        loading.getStyle().set("height", "4px");
 
-        footer.add(timestamp, loading);
-        header.add(name, model);
+        footer.add(timestamp);
+        header.add(name, rightMeta);
         bubble.add(header, message, footer);
         row.add(bubble);
         messagesLayout.add(row);
@@ -379,10 +400,10 @@ public class ChatView extends VerticalLayout {
 
         Div messageText = new Div();
         renderAssistantText(messageText, message);
-        messageText.getStyle().set("white-space", "pre-wrap");
-        messageText.getStyle().set("margin-top", "6px");
+        messageText.getStyle().set("white-space", "normal");
+        messageText.getStyle().set("margin-top", "4px");
         Span timestampText = createTimestampLabel(timestamp);
-        timestampText.getStyle().set("margin-top", "8px");
+        timestampText.getStyle().set("margin-top", "4px");
         timestampText.getStyle().set("display", "block");
 
         header.add(name, modelLabel);
@@ -454,7 +475,7 @@ public class ChatView extends VerticalLayout {
                   table.style.width = '100%';
                   table.style.borderCollapse = 'collapse';
                   table.style.marginTop = '8px';
-                  table.style.marginBottom = '8px';
+                  table.style.marginBottom = '6px';
                   table.style.fontSize = '0.9rem';
                 });
                 root.querySelectorAll('th, td').forEach((cell) => {
@@ -491,10 +512,13 @@ public class ChatView extends VerticalLayout {
                 root.querySelectorAll('ul, ol').forEach((list) => {
                   list.style.paddingLeft = '20px';
                   list.style.marginTop = '8px';
-                  list.style.marginBottom = '8px';
+                  list.style.marginBottom = '6px';
                 });
                 root.querySelectorAll('p').forEach((p) => {
-                  p.style.margin = '0 0 8px 0';
+                  p.style.margin = '0 0 6px 0';
+                });
+                root.querySelectorAll('p:last-child, ul:last-child, ol:last-child, pre:last-child, table:last-child, blockquote:last-child').forEach((el) => {
+                  el.style.marginBottom = '0';
                 });
                 """);
     }
@@ -518,7 +542,19 @@ public class ChatView extends VerticalLayout {
         return timestamp;
     }
 
-    private record PendingAssistantMessage(Span model, Div message, Span timestamp, ProgressBar loading) {
+    private Div createThinkingLoader() {
+        Div loader = new Div();
+        loader.addClassName("wizard-thinking-loader");
+        loader.getElement().setProperty("title", "Thinking...");
+        for (int i = 0; i < 3; i++) {
+            Span dot = new Span();
+            dot.addClassName("wizard-thinking-dot");
+            loader.add(dot);
+        }
+        return loader;
+    }
+
+    private record PendingAssistantMessage(Span model, Div message, Span timestamp, Div loading) {
     }
 
     private static class UiChatException extends RuntimeException {
