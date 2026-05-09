@@ -2,14 +2,10 @@ package dev.morenomjc.gleifagent;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.messages.AbstractMessage;
-import org.springframework.ai.chat.metadata.ChatResponseMetadata;
-import org.springframework.ai.chat.model.Generation;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.context.support.DefaultMessageSourceResolvable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -58,13 +54,13 @@ public class Chat {
     public ResponseEntity<ChatSuccessResponse> chat(@Valid @RequestBody ChatRequest chatRequest) {
         try {
             ChatResponse chatResponse = this.chatModel.call(new Prompt(chatRequest.message()));
-            String reply = Optional.of(chatResponse.getResult())
-                    .map(Generation::getOutput)
-                    .map(AbstractMessage::getText)
+            String reply = Optional.ofNullable(chatResponse.getResult())
+                    .map(result -> result.getOutput())
+                    .map(output -> output.getText())
                     .orElse("");
             String model = resolveModel(chatResponse);
-            String responseId = Optional.of(chatResponse.getMetadata())
-                    .map(ChatResponseMetadata::getId)
+            String responseId = Optional.ofNullable(chatResponse.getMetadata())
+                    .map(metadata -> metadata.getId())
                     .orElse(null);
 
             log.info("Processed chat request successfully. model={}, responseId={}", model, responseId);
@@ -84,7 +80,7 @@ public class Chat {
     public ResponseEntity<ChatErrorResponse> handleValidationError(MethodArgumentNotValidException ex) {
         String message = ex.getBindingResult().getFieldErrors().stream()
                 .findFirst()
-                .map(DefaultMessageSourceResolvable::getDefaultMessage)
+                .map(error -> error.getDefaultMessage())
                 .orElse("Invalid request body.");
 
         return ResponseEntity.badRequest().body(new ChatErrorResponse(
@@ -104,8 +100,8 @@ public class Chat {
     }
 
     private String resolveModel(ChatResponse chatResponse) {
-        return Optional.of(chatResponse.getMetadata())
-                .map(ChatResponseMetadata::getModel)
+        return Optional.ofNullable(chatResponse.getMetadata())
+                .map(metadata -> metadata.getModel())
                 .filter(model -> !model.isBlank())
                 .orElse(configuredModel);
     }

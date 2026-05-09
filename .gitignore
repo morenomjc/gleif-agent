@@ -31,3 +31,7 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Vaadin Generated ###
+src/main/frontend/generated/
+src/main/frontend/index.html
