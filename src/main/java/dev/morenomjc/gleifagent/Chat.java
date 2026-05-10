@@ -48,6 +48,8 @@ public class Chat {
     private final UnsupportedPromptReasonService unsupportedPromptReasonService;
     @Value("${spring.ai.openai.chat.options.model:unknown}")
     private String configuredModel;
+    @Value("${chat.unsupported.delay-ms:700}")
+    private long unsupportedPromptDelayMs;
 
     public record ChatRequest(
             @NotBlank(message = "message is required")
@@ -126,6 +128,7 @@ public class Chat {
     @ExceptionHandler(UnsupportedPromptException.class)
     public ResponseEntity<ChatErrorResponse> handleUnsupportedPrompt(UnsupportedPromptException ex) {
         log.info("Rejected unsupported prompt: {}", ex.getMessage());
+        applyUnsupportedPromptDelay();
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(new ChatErrorResponse(
                 "UNSUPPORTED_PROMPT",
                 unsupportedPromptReasonService.randomReason(),
@@ -138,6 +141,18 @@ public class Chat {
                 .map(metadata -> metadata.getModel())
                 .filter(model -> !model.isBlank())
                 .orElse(configuredModel);
+    }
+
+    private void applyUnsupportedPromptDelay() {
+        if (unsupportedPromptDelayMs <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(unsupportedPromptDelayMs);
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            log.debug("Unsupported prompt delay interrupted.");
+        }
     }
 
     private String normalizeReply(String reply, String model) {
